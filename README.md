@@ -61,3 +61,22 @@ python -m unittest discover -s tests -v
 The repository includes `railway.json` and uses the root `Dockerfile`. Railway's
 injected `PORT` is used automatically, with `TME_PORT` as a local fallback. Mount
 a persistent Railway volume at `/data` so the SQLite journal survives redeploys.
+
+## HRS Processing and Ready Queue
+
+The `tme serve` process runs a durable HRS-compatible processing worker after each
+journal commit. Processing state is isolated by wallet and coin. It ports the
+existing HRS lifecycle, capital, velocity, acceleration, eligibility, ranking and
+decision rules; HRS consumes only durable `ExecutionIntent` messages.
+
+Endpoints:
+
+- `GET /v1/ready/next?consumer=hrs-executor&wait=25`
+- `POST /v1/ready/{message_id}/ack`
+- `POST /v1/ready/{message_id}/nack`
+- `POST /v1/processing/held`
+- `GET /v1/processing/health`
+
+Set `HRS_ALLOCATION_GAP_PCT` on this service to the same strategy value used by
+HRS. Wallet ADD/PAUSE/RESUME/REMOVE state is read from the existing SQLite wallet
+manager without restarting the worker.

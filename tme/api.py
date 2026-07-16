@@ -34,6 +34,18 @@ class APIHandler(BaseHTTPRequestHandler):
             if u.path == "/health":
                 return self._json(200, {"status": "ok", "service": "trading-memory-engine", "version": "1.0.0"})
             if u.path == "/v1/report": return self._json(200, self.engine.report())
+            if u.path == "/v1/processing/health" and self.processor:
+                return self._json(200, {"status":"ok","queue":self.processor.queue.depth()})
+            if u.path == "/v1/ready/next" and self.processor:
+                consumer=q.get("consumer",[""])[0]
+                if not consumer: return self._json(400,{"error":"consumer_required"})
+                import time
+                deadline=time.monotonic()+min(max(int(q.get("wait",["25"])[0]),0),30)
+                while time.monotonic() <= deadline:
+                    item=self.processor.queue.claim(consumer,int(q.get("lease_ms",["30000"])[0]))
+                    if item: return self._json(200,item)
+                    time.sleep(.1)
+                return self._json(204,{})
             if u.path == "/v1/wallets": return self._json(200, self.engine.db.rows("SELECT * FROM wallets"))
             if len(parts) == 4 and parts[:2] == ["v1", "projection"]:
                 return self._json(200, self.engine.projection(parts[2], parts[3]))
@@ -52,6 +64,11 @@ class APIHandler(BaseHTTPRequestHandler):
             body = self._body()
             if parts == ["v1", "wallets"]: return self._json(201, self.engine.add_wallet(body["address"], body.get("label", "")))
             if parts == ["v1", "events", "fills"]: return self._json(201, self.engine.ingest_fill(body))
+            if len(parts)==4 and parts[:2]==["v1","ready"] and parts[3] in {"ack","nack"} and self.processor:
+                ok=(self.processor.queue.ack(parts[2],body.get("consumer","")) if parts[3]=="ack" else self.processor.queue.nack(parts[2],body.get("consumer",""),int(body.get("delay_ms",1000))))
+                return self._json(200 if ok else 409,{"ok":ok})
+            if parts==["v1","processing","held"] and self.processor:
+                self.processor.set_held(body["wallet"],body.get("asset"),body.get("side")); return self._json(200,{"ok":True})
             if len(parts) == 4 and parts[:2] == ["v1", "wallets"]: return self._json(200, self.engine.command_wallet(parts[2], parts[3]))
             if len(parts) == 4 and parts[:2] == ["v1", "recovery"] and parts[3] == "run":
                 return self._json(200, self.engine.recover(parts[2], body.get("current_state")))
@@ -68,8 +85,8 @@ class APIHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
 
 
-def serve(engine: MemoryEngine, host: str, port: int, web_root: Path) -> None:
-    handler = type("BoundAPIHandler", (APIHandler,), {"engine": engine, "web_root": web_root})
+def serve(engine: MemoryEngine, host: str, port: int, web_root: Path, processor: object | None = None) -> None:
+    handler = type("BoundAPIHandler", (APIHandler,), {"engine": engine, "web_root": web_root, "processor": processor})
     print(f"Trading Memory Engine listening on http://{host}:{port}")
     ThreadingHTTPServer((host, port), handler).serve_forever()
 
