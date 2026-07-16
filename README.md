@@ -80,3 +80,10 @@ Endpoints:
 Set `HRS_ALLOCATION_GAP_PCT` on this service to the same strategy value used by
 HRS. Wallet ADD/PAUSE/RESUME/REMOVE state is read from the existing SQLite wallet
 manager without restarting the worker.
+## Hyperliquid Collector
+
+When `HC_GRPC_ENDPOINT` and `HC_GRPC_TOKEN` are configured, `tme serve` starts the
+collector automatically. It subscribes before bootstrapping, buffers live fills,
+loads regular and TWAP history plus authoritative state, snapshots, reconciles,
+and then drains the live buffer. Wallets come only from SQLite Wallet Manager;
+ADD/PAUSE/RESUME/REMOVE is detected without restarting the service.

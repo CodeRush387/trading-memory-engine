@@ -1,10 +1,11 @@
 from __future__ import annotations
-import argparse,json,os,threading,time
+import argparse,asyncio,json,os,threading,time
 from pathlib import Path
 from .api import serve
 from .database import Database
 from .engine import MemoryEngine
 from .processing import ProcessingEngine
+from .collector_service import from_env as collector_from_env
 
 def processing_loop(processor:ProcessingEngine,interval:float)->None:
     while True:
@@ -21,6 +22,9 @@ def main()->None:
     if args.command=="serve":
         processor=ProcessingEngine(db,allocation_gap_pct=__import__("decimal").Decimal(os.getenv("HRS_ALLOCATION_GAP_PCT","3")))
         threading.Thread(target=processing_loop,args=(processor,args.processor_interval),name="hrs-processing",daemon=True).start()
+        collector_service=collector_from_env(db)
+        if collector_service:
+            threading.Thread(target=lambda: asyncio.run(collector_service.run()),name="hyperliquid-collector",daemon=True).start()
         serve(engine,args.host,args.port,Path(__file__).parent.parent/"web",processor)
     elif args.command=="wallet-add":print(json.dumps(engine.add_wallet(args.address,args.label),indent=2))
     elif args.command=="wallet-command":print(json.dumps(engine.command_wallet(args.address,args.action),indent=2))

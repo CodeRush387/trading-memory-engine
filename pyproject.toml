@@ -3,10 +3,10 @@ name = "trading-memory-engine"
 version = "1.0.0"
 description = "Event-sourced trading memory and materialized state service"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = ["grpcio>=1.82.1", "protobuf>=7.35.0", "requests>=2.32"]
 
 [project.optional-dependencies]
-grpc = ["grpcio>=1.70", "protobuf>=5"]
+grpc = ["grpcio>=1.82.1", "protobuf>=7.35.0"]
 dev = ["ruff>=0.9"]
 
 [project.scripts]

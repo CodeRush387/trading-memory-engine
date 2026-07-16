@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import mimetypes
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -22,6 +23,10 @@ class APIHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body))); self.send_header("Cache-Control", "no-store")
         self.end_headers(); self.wfile.write(body)
 
+    def _queue_authorized(self) -> bool:
+        if not self.queue_token: return True
+        return self.headers.get("Authorization", "") == f"Bearer {self.queue_token}"
+
     def _body(self) -> dict:
         return json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))) or b"{}")
 
@@ -34,6 +39,8 @@ class APIHandler(BaseHTTPRequestHandler):
             if u.path == "/health":
                 return self._json(200, {"status": "ok", "service": "trading-memory-engine", "version": "1.0.0"})
             if u.path == "/v1/report": return self._json(200, self.engine.report())
+            if u.path.startswith("/v1/ready/") or u.path == "/v1/processing/health":
+                if not self._queue_authorized(): return self._json(401,{"error":"unauthorized"})
             if u.path == "/v1/processing/health" and self.processor:
                 return self._json(200, {"status":"ok","queue":self.processor.queue.depth()})
             if u.path == "/v1/ready/next" and self.processor:
@@ -62,6 +69,8 @@ class APIHandler(BaseHTTPRequestHandler):
         try:
             parts = [p for p in urlparse(self.path).path.split("/") if p]
             body = self._body()
+            if (parts[:2]==["v1","ready"] or parts==["v1","processing","held"]) and not self._queue_authorized():
+                return self._json(401,{"error":"unauthorized"})
             if parts == ["v1", "wallets"]: return self._json(201, self.engine.add_wallet(body["address"], body.get("label", "")))
             if parts == ["v1", "events", "fills"]: return self._json(201, self.engine.ingest_fill(body))
             if len(parts)==4 and parts[:2]==["v1","ready"] and parts[3] in {"ack","nack"} and self.processor:
@@ -86,7 +95,7 @@ class APIHandler(BaseHTTPRequestHandler):
 
 
 def serve(engine: MemoryEngine, host: str, port: int, web_root: Path, processor: object | None = None) -> None:
-    handler = type("BoundAPIHandler", (APIHandler,), {"engine": engine, "web_root": web_root, "processor": processor})
+    handler = type("BoundAPIHandler", (APIHandler,), {"engine": engine, "web_root": web_root, "processor": processor, "queue_token": os.getenv("TME_QUEUE_TOKEN", "")})
     print(f"Trading Memory Engine listening on http://{host}:{port}")
     ThreadingHTTPServer((host, port), handler).serve_forever()
 
