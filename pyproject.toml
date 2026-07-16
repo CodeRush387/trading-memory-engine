@@ -1,0 +1,21 @@
+[project]
+name = "trading-memory-engine"
+version = "1.0.0"
+description = "Event-sourced trading memory and materialized state service"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+grpc = ["grpcio>=1.70", "protobuf>=5"]
+dev = ["ruff>=0.9"]
+
+[project.scripts]
+tme = "tme.cli:main"
+
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["tme"]
+
