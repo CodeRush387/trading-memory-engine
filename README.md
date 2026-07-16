@@ -55,3 +55,9 @@ credentials and generated protobuf modules outside the memory core.
 python -m unittest discover -s tests -v
 ```
 
+
+## Railway
+
+The repository includes `railway.json` and uses the root `Dockerfile`. Railway's
+injected `PORT` is used automatically, with `TME_PORT` as a local fallback. Mount
+a persistent Railway volume at `/data` so the SQLite journal survives redeploys.

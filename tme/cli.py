@@ -14,7 +14,10 @@ def main() -> None:
     p = argparse.ArgumentParser(prog="tme")
     p.add_argument("--db", default=os.getenv("TME_DB", "data/tme.db"))
     sub = p.add_subparsers(dest="command", required=True)
-    s = sub.add_parser("serve"); s.add_argument("--host", default=os.getenv("TME_HOST", "127.0.0.1")); s.add_argument("--port", type=int, default=int(os.getenv("TME_PORT", "8080")))
+    s = sub.add_parser("serve")
+    s.add_argument("--host", default=os.getenv("TME_HOST", "0.0.0.0"))
+    # Railway injects PORT. TME_PORT remains available for non-Railway deployments.
+    s.add_argument("--port", type=int, default=int(os.getenv("PORT", os.getenv("TME_PORT", "8080"))))
     w = sub.add_parser("wallet-add"); w.add_argument("address"); w.add_argument("--label", default="")
     c = sub.add_parser("wallet-command"); c.add_argument("address"); c.add_argument("action")
     f = sub.add_parser("ingest-fill"); f.add_argument("json")
@@ -28,4 +31,3 @@ def main() -> None:
 
 
 if __name__ == "__main__": main()
-
