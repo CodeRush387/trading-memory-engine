@@ -20,6 +20,11 @@ class HyperliquidCollectorService:
     def wallets(self)->set[str]:return {r["address"] for r in self.db.rows("SELECT address FROM wallets WHERE status IN ('DISCOVERING','SYNCING','READY','LIVE')")}
     async def bootstrap(self,wallet:str)->None:
         self.heartbeat("SYNCING",wallet=wallet)
+        existing=self.coverage.report(wallet)
+        if existing.get("joined_at_ms"):
+            self.bootstrapped.add(wallet);self.heartbeat("LIVE",wallet=wallet,coverage_pct=existing["coverage_pct"],legacy_remaining=existing["legacy_remaining"],restored=True)
+            return
+
         with self.db.transaction() as con:con.execute("UPDATE wallets SET status='SYNCING',recovery_status='RECOVERING' WHERE address=?",(wallet,))
         state=await asyncio.to_thread(self.adapter.current_state,wallet,self.dexes)
         report=self.coverage.onboard(wallet,state);self.bootstrapped.add(wallet);self.last_sync_ms=int(time.time()*1000)
