@@ -10,6 +10,7 @@ from urllib.parse import parse_qs, urlparse
 from .engine import MemoryEngine
 
 from .coverage import WalletCoverage
+from .executor_lease import ExecutorLease
 
 class APIHandler(BaseHTTPRequestHandler):
     engine: MemoryEngine
@@ -47,10 +48,12 @@ class APIHandler(BaseHTTPRequestHandler):
                 ok=all(components.get(name,{}).get("healthy",False) for name in required)
                 return self._json(200 if ok else 503,{"status":"ok" if ok else "unhealthy","service":"trading-memory-engine","version":"1.0.0","components":components,"queue":queue})
             if u.path == "/v1/report": return self._json(200, self.engine.report())
-            if u.path.startswith("/v1/ready/") or u.path == "/v1/processing/health":
+            if u.path.startswith("/v1/ready/") or u.path == "/v1/processing/health" or u.path == "/v1/executor/lease":
                 if not self._queue_authorized(): return self._json(401,{"error":"unauthorized"})
             if u.path == "/v1/processing/health" and self.processor:
                 return self._json(200, {"status":"ok","queue":self.processor.queue.health()})
+            if u.path == "/v1/executor/lease":
+                return self._json(200,ExecutorLease(self.engine.db).status())
             if u.path == "/v1/ready/next" and self.processor:
                 consumer=q.get("consumer",[""])[0]
                 if not consumer: return self._json(400,{"error":"consumer_required"})
@@ -77,10 +80,17 @@ class APIHandler(BaseHTTPRequestHandler):
         try:
             parts = [p for p in urlparse(self.path).path.split("/") if p]
             body = self._body()
-            if (parts[:2]==["v1","ready"] or parts==["v1","processing","held"]) and not self._queue_authorized():
+            if (parts[:2]==["v1","ready"] or parts[:2]==["v1","executor"] or parts==["v1","processing","held"]) and not self._queue_authorized():
                 return self._json(401,{"error":"unauthorized"})
             if parts == ["v1", "wallets"]: return self._json(201, self.engine.add_wallet(body["address"], body.get("label", "")))
             if parts == ["v1", "events", "fills"]: return self._json(201, self.engine.ingest_fill(body))
+            if len(parts)==4 and parts[:3]==["v1","executor","lease"]:
+                lease=ExecutorLease(self.engine.db);action=parts[3]
+                if action=="acquire": result=lease.acquire(body.get("owner_id",""),body.get("signer_address",""),body.get("ttl_ms",45000))
+                elif action=="renew": result=lease.renew(body.get("owner_id",""),body.get("signer_address",""),body.get("ttl_ms",45000))
+                elif action=="release": return self._json(200 if lease.release(body.get("owner_id","")) else 409,{"released":True})
+                else:return self._json(404,{"error":"not_found"})
+                return self._json(200 if result.get("acquired") else 409,result)
             if len(parts)==4 and parts[:2]==["v1","ready"] and parts[3] in {"ack","nack","renew"} and self.processor:
                 if parts[3]=="ack": ok=self.processor.queue.ack(parts[2],body.get("consumer",""))
                 elif parts[3]=="nack": ok=self.processor.queue.nack(parts[2],body.get("consumer",""),int(body.get("delay_ms",1000)))
