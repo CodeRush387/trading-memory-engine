@@ -57,6 +57,17 @@ CREATE TABLE IF NOT EXISTS wallet_onboarding (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(wallet) REFERENCES wallets(address)
 );
+CREATE TABLE IF NOT EXISTS notification_outbox (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, wallet TEXT NOT NULL,
+  event_type TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'PENDING',
+  attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT,
+  next_attempt_ms INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, sent_at TEXT,
+  UNIQUE(wallet,event_type), FOREIGN KEY(wallet) REFERENCES wallets(address)
+);
+CREATE INDEX IF NOT EXISTS notification_pending
+  ON notification_outbox(status,id);
+
 CREATE TABLE IF NOT EXISTS wallet_asset_coverage (
   wallet TEXT NOT NULL, coin TEXT NOT NULL, state TEXT NOT NULL,
   baseline_size TEXT NOT NULL, current_size TEXT NOT NULL, updated_at_ms INTEGER NOT NULL,

@@ -6,12 +6,13 @@ from .database import Database
 from .engine import MemoryEngine
 from .hyperliquid import HyperliquidAdapter
 from .coverage import WalletCoverage
+from .notifications import EmailNotifier
 
 log=logging.getLogger("tme.collector")
 ACTIVE={"DISCOVERING","SYNCING","READY","LIVE"}
 class HyperliquidCollectorService:
     def __init__(self,db:Database,adapter:HyperliquidAdapter,refresh_seconds:float=1,dexes:tuple[str|None,...]=(None,)):
-        self.db=db;self.adapter=adapter;self.collector=Collector(MemoryEngine(db));self.coverage=WalletCoverage(db);self.refresh_seconds=refresh_seconds;self.dexes=dexes;self.bootstrapped=set();self.stop=asyncio.Event();self.last_sync_ms=0;self.last_event_ms=0
+        self.db=db;self.adapter=adapter;self.collector=Collector(MemoryEngine(db));self.coverage=WalletCoverage(db);self.notifier=EmailNotifier(db);self.refresh_seconds=refresh_seconds;self.dexes=dexes;self.bootstrapped=set();self.stop=asyncio.Event();self.last_sync_ms=0;self.last_event_ms=0
     def heartbeat(self,status:str="LIVE",error:str|None=None,**details)->None:
         with self.db.transaction() as con:
             details={"last_sync_ms":self.last_sync_ms,"last_event_ms":self.last_event_ms,**details}
@@ -35,6 +36,11 @@ class HyperliquidCollectorService:
         async def reader():
             async for item in self.adapter.trades(sorted(wallets)):await queue.put(item)
         task=asyncio.create_task(reader(),name="hyperliquid-grpc-reader")
+        async def notifier_loop():
+            while not self.stop.is_set():
+                await asyncio.to_thread(self.notifier.drain_one)
+                await asyncio.sleep(5)
+        notify_task=asyncio.create_task(notifier_loop(),name="email-notification-outbox")
         try:
             for wallet in sorted(wallets-self.bootstrapped):await self.bootstrap(wallet)
             while not self.stop.is_set():
@@ -51,7 +57,7 @@ class HyperliquidCollectorService:
                     self.collector.accept_fill(event)
                     self.last_event_ms=int(time.time()*1000)
                     self.coverage.observe(wallet,event)
-        finally:task.cancel();await asyncio.gather(task,return_exceptions=True)
+        finally:task.cancel();notify_task.cancel();await asyncio.gather(task,notify_task,return_exceptions=True)
     async def run(self)->None:
         backoff=1.0
         while not self.stop.is_set():

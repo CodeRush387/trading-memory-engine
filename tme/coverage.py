@@ -25,10 +25,14 @@ class WalletCoverage:
             total=len(positions);ready=total==0
             con.execute("INSERT INTO wallet_onboarding(wallet,joined_at_ms,snapshot,legacy_total,legacy_remaining,coverage_pct,ready_for_execution) VALUES(?,?,?,?,?,?,?) ON CONFLICT(wallet) DO UPDATE SET joined_at_ms=excluded.joined_at_ms,snapshot=excluded.snapshot,legacy_total=excluded.legacy_total,legacy_remaining=excluded.legacy_remaining,coverage_pct=excluded.coverage_pct,ready_for_execution=excluded.ready_for_execution,updated_at=CURRENT_TIMESTAMP",(wallet,now,json.dumps(state,separators=(",",":")),total,total,"100" if ready else "0",int(ready)))
             con.execute("UPDATE wallets SET status=?,recovery_status='HEALTHY',last_error=NULL,updated_at=CURRENT_TIMESTAMP WHERE address=?",("LIVE" if ready else "SYNCING",wallet))
+            if ready:
+                con.execute("INSERT OR IGNORE INTO notification_outbox(wallet,event_type) VALUES(?,'COVERAGE_COMPLETE')",(wallet,))
         return self.report(wallet)
     def observe(self,wallet:str,canonical:dict[str,Any])->dict[str,Any]:
         wallet=wallet.lower();coin=str(canonical["coin"]).upper();raw=canonical.get("raw") or {};start=Decimal(str(raw.get("startPosition","0")));qty=Decimal(str(canonical["size"]));after=start+(qty if canonical["side"]=="BUY" else -qty);now=int(time.time()*1000)
         with self.db.transaction() as con:
+            gate=con.execute("SELECT ready_for_execution FROM wallet_onboarding WHERE wallet=?",(wallet,)).fetchone()
+            was_ready=bool(gate["ready_for_execution"]) if gate else False
             row=con.execute("SELECT state FROM wallet_asset_coverage WHERE wallet=? AND coin=?",(wallet,coin)).fetchone();old=row["state"] if row else "ARMED"
             state=old
             if old=="LEGACY" and (after==ZERO or start*after<ZERO):state="ARMED" if after==ZERO else "OWNED"
@@ -38,6 +42,8 @@ class WalletCoverage:
             total=int(con.execute("SELECT legacy_total FROM wallet_onboarding WHERE wallet=?",(wallet,)).fetchone()["legacy_total"]);remaining=int(con.execute("SELECT COUNT(*) n FROM wallet_asset_coverage WHERE wallet=? AND state='LEGACY'",(wallet,)).fetchone()["n"]);coverage=Decimal("100") if total==0 else Decimal(total-remaining)*Decimal("100")/Decimal(total);ready=remaining==0
             con.execute("UPDATE wallet_onboarding SET legacy_remaining=?,coverage_pct=?,ready_for_execution=?,updated_at=CURRENT_TIMESTAMP WHERE wallet=?",(remaining,str(coverage),int(ready),wallet))
             con.execute("UPDATE wallets SET status=?,recovery_status='HEALTHY',updated_at=CURRENT_TIMESTAMP WHERE address=?",("LIVE" if ready else "SYNCING",wallet))
+            if ready and not was_ready:
+                con.execute("INSERT OR IGNORE INTO notification_outbox(wallet,event_type) VALUES(?,'COVERAGE_COMPLETE')",(wallet,))
         return self.report(wallet)
     def report(self,wallet:str)->dict[str,Any]:
         rows=self.db.rows("SELECT w.address wallet,w.status,w.recovery_status,o.coverage_pct,o.ready_for_execution,o.legacy_total,o.legacy_remaining,o.joined_at_ms FROM wallets w LEFT JOIN wallet_onboarding o ON o.wallet=w.address WHERE w.address=?",(wallet.lower(),))
