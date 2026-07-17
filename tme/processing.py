@@ -51,6 +51,8 @@ class ProcessingEngine:
         if runtime:state.held_asset,state.held_side=runtime["held_asset"],runtime["held_side"]
         ProcessingCore.rebuild_wallet(state,previous=previous)
         for coin,item in state.lifecycles.items():con.execute("UPDATE processor_assets SET share=? WHERE processor=? AND wallet=? AND coin=?",(str(item.share),self.name,wallet,coin))
+        canonical=json.loads(event["payload"])
+        if canonical.get("ingestion_mode")=="RECOVERY":return
         result=ProcessingCore.evaluate(state,fill,self.allocation_gap_pct)
         if result.decision not in {Decision.INITIAL_ENTRY,Decision.ROTATE_SIGNAL} or result.challenger is None:return
         item=result.challenger; action="ENTRY" if result.decision==Decision.INITIAL_ENTRY else "ROTATE"; generation=item.latest_capital_event.fill.event_id

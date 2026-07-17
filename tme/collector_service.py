@@ -21,8 +21,11 @@ class HyperliquidCollectorService:
         self.heartbeat("SYNCING",wallet=wallet)
         with self.db.transaction() as con:con.execute("UPDATE wallets SET status='SYNCING',recovery_status='RECOVERING' WHERE address=?",(wallet,))
         fills,state=await asyncio.gather(asyncio.to_thread(self.adapter.historical_fills,wallet),asyncio.to_thread(self.adapter.current_state,wallet,self.dexes))
-        for raw in fills:
-            try:self.collector.accept_fill(self.adapter.canonical(wallet,raw))
+        for index,raw in enumerate(fills,1):
+            try:
+                event=self.adapter.canonical(wallet,raw);event["ingestion_mode"]="RECOVERY"
+                self.collector.accept_fill(event)
+                if index%250==0:self.heartbeat("SYNCING",wallet=wallet,ingested=index,total=len(fills))
             except RuntimeError as exc:
                 if "wallet is" not in str(exc):raise
         self.collector.engine.snapshot(wallet)
@@ -46,7 +49,8 @@ class HyperliquidCollectorService:
                     self.heartbeat("LIVE",wallet_count=len(current))
                     continue
                 if wallet in current and "px" in raw and "sz" in raw:
-                    self.collector.accept_fill(self.adapter.canonical(wallet,raw))
+                    event=self.adapter.canonical(wallet,raw);event["ingestion_mode"]="LIVE"
+                    self.collector.accept_fill(event)
                     self.last_event_ms=int(time.time()*1000)
         finally:task.cancel();await asyncio.gather(task,return_exceptions=True)
     async def run(self)->None:

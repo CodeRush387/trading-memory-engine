@@ -74,6 +74,11 @@ class ReadyQueue:
     def depth(self) -> dict[str,int]:
         rows=self.db.rows("SELECT status,COUNT(*) count FROM ready_queue GROUP BY status")
         result={"READY":0,"INFLIGHT":0,"ACKED":0}; result.update({r["status"]:r["count"] for r in rows}); return result
+    def quarantine_pending(self)->int:
+        with self.db.transaction() as con:
+            cur=con.execute("UPDATE ready_queue SET status='QUARANTINED',lease_until_ms=NULL,consumer=NULL WHERE status IN ('READY','INFLIGHT')")
+            return cur.rowcount
+
     def health(self) -> dict[str,Any]:
         now=int(time.time()*1000); depth=self.depth()
         row=self.db.connection().execute("SELECT MIN(available_at_ms) oldest FROM ready_queue WHERE status IN ('READY','INFLIGHT')").fetchone()

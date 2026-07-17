@@ -84,6 +84,10 @@ class APIHandler(BaseHTTPRequestHandler):
                 if parts[3]=="ack": ok=self.processor.queue.ack(parts[2],body.get("consumer",""))
                 elif parts[3]=="nack": ok=self.processor.queue.nack(parts[2],body.get("consumer",""),int(body.get("delay_ms",1000)))
                 else: ok=self.processor.queue.renew(parts[2],body.get("consumer",""),int(body.get("lease_ms",90000)))
+            if parts==["v1","ready","quarantine"] and self.processor:
+                if body.get("confirm")!="recovery-backfill":return self._json(400,{"error":"confirmation_required"})
+                count=self.processor.queue.quarantine_pending()
+                return self._json(200,{"ok":True,"quarantined":count})
                 return self._json(200 if ok else 409,{"ok":ok})
             if parts==["v1","processing","held"] and self.processor:
                 self.processor.set_held(body["wallet"],body.get("asset"),body.get("side")); return self._json(200,{"ok":True})
