@@ -44,6 +44,11 @@ CREATE TABLE IF NOT EXISTS collector_offsets (
   source TEXT NOT NULL, wallet TEXT NOT NULL, cursor TEXT NOT NULL,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(source,wallet)
 );
+CREATE TABLE IF NOT EXISTS operational_status (
+  component TEXT PRIMARY KEY, status TEXT NOT NULL, heartbeat_ms INTEGER NOT NULL,
+  details TEXT NOT NULL DEFAULT '{}', last_error TEXT,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 
 CREATE TRIGGER IF NOT EXISTS journal_no_update BEFORE UPDATE ON event_journal
 BEGIN SELECT RAISE(ABORT, 'event_journal is append-only'); END;

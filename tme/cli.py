@@ -9,7 +9,10 @@ from .collector_service import from_env as collector_from_env
 
 def processing_loop(processor:ProcessingEngine,interval:float)->None:
     while True:
-        count=processor.process_available()
+        try: count=processor.process_available()
+        except Exception as exc:
+            with processor.db.transaction() as con: con.execute("INSERT INTO operational_status(component,status,heartbeat_ms,details,last_error) VALUES('processor','FAILED',?,'{}',?) ON CONFLICT(component) DO UPDATE SET status='FAILED',heartbeat_ms=excluded.heartbeat_ms,last_error=excluded.last_error,updated_at=CURRENT_TIMESTAMP",(int(time.time()*1000),str(exc)))
+            time.sleep(interval); continue
         if count<500: time.sleep(interval)
 
 def main()->None:
@@ -25,7 +28,7 @@ def main()->None:
         collector_service=collector_from_env(db)
         if collector_service:
             threading.Thread(target=lambda: asyncio.run(collector_service.run()),name="hyperliquid-collector",daemon=True).start()
-        serve(engine,args.host,args.port,Path(__file__).parent.parent/"web",processor)
+        serve(engine,args.host,args.port,Path(__file__).parent.parent/"web",processor,collector_service is not None)
     elif args.command=="wallet-add":print(json.dumps(engine.add_wallet(args.address,args.label),indent=2))
     elif args.command=="wallet-command":print(json.dumps(engine.command_wallet(args.address,args.action),indent=2))
     elif args.command=="ingest-fill":print(json.dumps(engine.ingest_fill(json.loads(args.json)),indent=2))

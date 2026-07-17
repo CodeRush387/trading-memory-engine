@@ -65,6 +65,18 @@ class ReadyQueue:
             cur=con.execute("UPDATE ready_queue SET status='READY',available_at_ms=?,lease_until_ms=NULL,consumer=NULL WHERE message_id=? AND consumer=? AND status='INFLIGHT'",(int(time.time()*1000)+max(0,delay_ms),message_id,consumer))
             return cur.rowcount==1
 
+    def renew(self,message_id:str,consumer:str,lease_ms:int=90_000)->bool:
+        now=int(time.time()*1000)
+        with self.db.transaction() as con:
+            cur=con.execute("UPDATE ready_queue SET lease_until_ms=? WHERE message_id=? AND consumer=? AND status='INFLIGHT' AND lease_until_ms>?",(now+max(1000,lease_ms),message_id,consumer,now))
+            return cur.rowcount==1
+
     def depth(self) -> dict[str,int]:
         rows=self.db.rows("SELECT status,COUNT(*) count FROM ready_queue GROUP BY status")
         result={"READY":0,"INFLIGHT":0,"ACKED":0}; result.update({r["status"]:r["count"] for r in rows}); return result
+    def health(self) -> dict[str,Any]:
+        now=int(time.time()*1000); depth=self.depth()
+        row=self.db.connection().execute("SELECT MIN(available_at_ms) oldest FROM ready_queue WHERE status IN ('READY','INFLIGHT')").fetchone()
+        journal=self.db.connection().execute("SELECT COALESCE(MAX(sequence),0) n FROM event_journal").fetchone()["n"]
+        offset=self.db.connection().execute("SELECT COALESCE(MAX(last_sequence),0) n FROM processor_offsets").fetchone()["n"]
+        return {"depth":depth,"oldest_age_ms":max(0,now-int(row["oldest"])) if row and row["oldest"] is not None else 0,"sequence_lag":max(0,int(journal)-int(offset))}

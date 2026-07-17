@@ -30,4 +30,12 @@ class ProcessingIntegrationTests(unittest.TestCase):
         self.make_signal(A,"a"); self.processor.process_available(); self.db.close(); db2=Database(self.path); restarted=ProcessingEngine(db2); self.assertEqual(restarted.process_available(),0); self.assertEqual(restarted.queue.depth()["READY"],1); db2.close()
     def test_held_feedback_changes_entry_to_rotation(self):
         self.processor.set_held(A,"BTC","LONG"); self.make_signal(A,"a"); self.processor.process_available(); item=self.processor.queue.claim("hrs"); self.assertEqual(item["payload"]["action"],"ROTATE")
+    def test_inflight_lease_can_be_renewed_before_ack(self):
+        self.make_signal(A,"a");self.processor.process_available();item=self.processor.queue.claim("hrs",1000)
+        before=item["lease_until_ms"]
+        self.assertTrue(self.processor.queue.renew(item["message_id"],"hrs",90000))
+        row=self.db.rows("SELECT lease_until_ms FROM ready_queue WHERE message_id=?",(item["message_id"],))[0]
+        self.assertGreater(row["lease_until_ms"],before)
+        self.assertTrue(self.processor.queue.ack(item["message_id"],"hrs"))
+
 if __name__=="__main__":unittest.main()

@@ -1,5 +1,5 @@
 from __future__ import annotations
-import json
+import json,time
 from decimal import Decimal
 from typing import Any
 from .database import Database
@@ -20,6 +20,9 @@ class ProcessingEngine:
                 sequence=int(event["sequence"])
                 if event["status"] in ACTIVE:self._process_event(con,event)
                 con.execute("INSERT INTO processor_offsets(processor,last_sequence) VALUES(?,?) ON CONFLICT(processor) DO UPDATE SET last_sequence=excluded.last_sequence,updated_at=CURRENT_TIMESTAMP",(self.name,sequence))
+            last_sequence=int(events[-1]["sequence"]) if events else after
+            details=json.dumps({"last_sequence":last_sequence,"processed":len(events)},separators=(",",":"))
+            con.execute("INSERT INTO operational_status(component,status,heartbeat_ms,details,last_error) VALUES('processor','LIVE',?,?,NULL) ON CONFLICT(component) DO UPDATE SET status=excluded.status,heartbeat_ms=excluded.heartbeat_ms,details=excluded.details,last_error=NULL,updated_at=CURRENT_TIMESTAMP",(int(time.time()*1000),details))
             return len(events)
     def _source_fill(self,wallet,payload,prior_size=ZERO):
         canonical=json.loads(payload); raw=canonical.get("raw") if isinstance(canonical.get("raw"),dict) else canonical

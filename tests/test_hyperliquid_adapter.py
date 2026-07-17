@@ -22,4 +22,19 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
     async def test_bootstrap_enters_journal_projection_and_live(self):
         tmp=tempfile.TemporaryDirectory();db=Database(str(Path(tmp.name)/"db.sqlite"));MemoryEngine(db).add_wallet(W);service=HyperliquidCollectorService(db,FakeAdapter());await service.bootstrap(W)
         self.assertEqual(db.rows("SELECT COUNT(*) n FROM event_journal")[0]["n"],1);self.assertEqual(MemoryEngine(db).projection(W,"BTC")["size"],"1");self.assertEqual(MemoryEngine(db).wallet(W)["status"],"LIVE");db.close();tmp.cleanup()
+    async def test_stream_failure_forces_all_wallets_to_reconcile(self):
+        tmp=tempfile.TemporaryDirectory();db=Database(str(Path(tmp.name)/"db.sqlite"));MemoryEngine(db).add_wallet(W)
+        service=HyperliquidCollectorService(db,FakeAdapter(),refresh_seconds=.01);service.bootstrapped.add(W);calls=[]
+        async def subscription(wallets):
+            calls.append(set(service.bootstrapped))
+            if len(calls)==1: raise RuntimeError("stream disconnected")
+            service.stop.set()
+        service.run_subscription=subscription
+        await asyncio.wait_for(service.run(),2)
+        self.assertEqual(calls[0],{W})
+        self.assertEqual(calls[1],set())
+        row=db.rows("SELECT status,last_error FROM operational_status WHERE component='collector'")[0]
+        self.assertEqual(row["status"],"RECONNECTING")
+        db.close();tmp.cleanup()
+
 if __name__=="__main__":unittest.main()
