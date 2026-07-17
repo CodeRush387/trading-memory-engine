@@ -54,7 +54,10 @@ class HyperliquidCollectorService:
         while not self.stop.is_set():
             wallets=self.wallets()
             self.bootstrapped.intersection_update(wallets)
-            if not wallets:await asyncio.sleep(self.refresh_seconds);continue
+            if not wallets:
+                self.heartbeat("LIVE",wallet_count=0,idle=True)
+                await asyncio.sleep(self.refresh_seconds)
+                continue
             try:await self.run_subscription(wallets);backoff=1.0
             except asyncio.CancelledError:raise
             except Exception as exc:
