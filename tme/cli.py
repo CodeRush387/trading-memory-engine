@@ -7,9 +7,9 @@ from .engine import MemoryEngine
 from .processing import ProcessingEngine
 from .collector_service import from_env as collector_from_env
 
-def processing_loop(processor:ProcessingEngine,interval:float)->None:
+def processing_loop(processor:ProcessingEngine,interval:float,batch_size:int)->None:
     while True:
-        try: count=processor.process_available()
+        try: count=processor.process_available(batch_size)
         except Exception as exc:
             with processor.db.transaction() as con: con.execute("INSERT INTO operational_status(component,status,heartbeat_ms,details,last_error) VALUES('processor','FAILED',?,'{}',?) ON CONFLICT(component) DO UPDATE SET status='FAILED',heartbeat_ms=excluded.heartbeat_ms,last_error=excluded.last_error,updated_at=CURRENT_TIMESTAMP",(int(time.time()*1000),str(exc)))
             time.sleep(interval); continue
@@ -24,7 +24,7 @@ def main()->None:
     args=p.parse_args(); db=Database(args.db); engine=MemoryEngine(db)
     if args.command=="serve":
         processor=ProcessingEngine(db,allocation_gap_pct=__import__("decimal").Decimal(os.getenv("HRS_ALLOCATION_GAP_PCT","3")))
-        threading.Thread(target=processing_loop,args=(processor,args.processor_interval),name="hrs-processing",daemon=True).start()
+        threading.Thread(target=processing_loop,args=(processor,args.processor_interval,int(os.getenv("PROCESSOR_BATCH_SIZE","25"))),name="hrs-processing",daemon=True).start()
         collector_service=collector_from_env(db)
         if collector_service:
             threading.Thread(target=lambda: asyncio.run(collector_service.run()),name="hyperliquid-collector",daemon=True).start()

@@ -40,7 +40,7 @@ class APIHandler(BaseHTTPRequestHandler):
                 import time
                 now=int(time.time()*1000); stale_ms=int(os.getenv("TME_HEARTBEAT_STALE_MS","30000")); components={}
                 for row in self.engine.db.rows("SELECT * FROM operational_status"):
-                    age=max(0,now-int(row["heartbeat_ms"])); components[row["component"]]={"status":row["status"],"heartbeat_age_ms":age,"last_error":row["last_error"],"details":json.loads(row["details"]),"healthy":age<=stale_ms and row["status"]=="LIVE"}
+                    age=max(0,now-int(row["heartbeat_ms"])); components[row["component"]]={"status":row["status"],"heartbeat_age_ms":age,"last_error":row["last_error"],"details":json.loads(row["details"]),"healthy":age<=stale_ms and row["status"] in {"LIVE","SYNCING","RECONNECTING"}}
                 required=["processor"]+(["collector"] if self.collector_enabled else [])
                 queue=self.processor.queue.health() if self.processor else None
                 ok=all(components.get(name,{}).get("healthy",False) for name in required)
