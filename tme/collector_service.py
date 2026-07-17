@@ -12,12 +12,14 @@ log=logging.getLogger("tme.collector")
 ACTIVE={"DISCOVERING","SYNCING","READY","LIVE"}
 class HyperliquidCollectorService:
     def __init__(self,db:Database,adapter:HyperliquidAdapter,refresh_seconds:float=1,dexes:tuple[str|None,...]=(None,)):
-        self.db=db;self.adapter=adapter;self.collector=Collector(MemoryEngine(db));self.coverage=WalletCoverage(db);self.notifier=EmailNotifier(db);self.refresh_seconds=refresh_seconds;self.dexes=dexes;self.bootstrapped=set();self.stop=asyncio.Event();self.last_sync_ms=0;self.last_event_ms=0
+        self.db=db;self.adapter=adapter;self.collector=Collector(MemoryEngine(db));self.coverage=WalletCoverage(db);self.notifier=EmailNotifier(db);self.refresh_seconds=refresh_seconds;self.dexes=dexes;self.bootstrapped=set();self.stop=asyncio.Event();self.last_sync_ms=0;self.last_event_ms=0;self.last_heartbeat_ms=0
     def heartbeat(self,status:str="LIVE",error:str|None=None,**details)->None:
+        now=int(time.time()*1000)
         with self.db.transaction() as con:
             details={"last_sync_ms":self.last_sync_ms,"last_event_ms":self.last_event_ms,**details}
-            details["last_fill_age_ms"]=max(0,int(time.time()*1000)-self.last_event_ms) if self.last_event_ms else None
-            con.execute("INSERT INTO operational_status(component,status,heartbeat_ms,details,last_error) VALUES('collector',?,?,?,?) ON CONFLICT(component) DO UPDATE SET status=excluded.status,heartbeat_ms=excluded.heartbeat_ms,details=excluded.details,last_error=excluded.last_error,updated_at=CURRENT_TIMESTAMP",(status,int(time.time()*1000),json.dumps(details,separators=(",",":")),error))
+            details["last_fill_age_ms"]=max(0,now-self.last_event_ms) if self.last_event_ms else None
+            con.execute("INSERT INTO operational_status(component,status,heartbeat_ms,details,last_error) VALUES('collector',?,?,?,?) ON CONFLICT(component) DO UPDATE SET status=excluded.status,heartbeat_ms=excluded.heartbeat_ms,details=excluded.details,last_error=excluded.last_error,updated_at=CURRENT_TIMESTAMP",(status,now,json.dumps(details,separators=(",",":")),error))
+        self.last_heartbeat_ms=now
     def wallets(self)->set[str]:return {r["address"] for r in self.db.rows("SELECT address FROM wallets WHERE status IN ('DISCOVERING','SYNCING','READY','LIVE')")}
     async def bootstrap(self,wallet:str)->None:
         self.heartbeat("SYNCING",wallet=wallet)
@@ -57,6 +59,8 @@ class HyperliquidCollectorService:
                     self.collector.accept_fill(event)
                     self.last_event_ms=int(time.time()*1000)
                     self.coverage.observe(wallet,event)
+                    if self.last_event_ms-self.last_heartbeat_ms>=10000:
+                        self.heartbeat("LIVE",wallet_count=len(current))
         finally:task.cancel();notify_task.cancel();await asyncio.gather(task,notify_task,return_exceptions=True)
     async def run(self)->None:
         backoff=1.0
