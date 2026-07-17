@@ -31,7 +31,7 @@ class ProcessingEngine:
         mapped={"coin":canonical["coin"],"px":canonical["price"],"sz":canonical["size"],"side":side,"time":canonical["timestamp_ms"],"startPosition":str(raw.get("startPosition",prior_size)),"tid":raw.get("tid") or canonical.get("event_id",""),"oid":canonical.get("order_id") or raw.get("oid","") ,"dir":raw.get("dir","")}
         return Fill.from_raw(wallet,mapped)
     def _all_fills(self,con,wallet,coin,through):
-        rows=con.execute("SELECT payload FROM event_journal WHERE wallet=? AND coin=? AND event_type='FILL' AND sequence<=? ORDER BY sequence",(wallet,coin,through)).fetchall(); result=[]; prior=ZERO
+        rows=con.execute("SELECT payload FROM event_journal WHERE wallet=? AND coin=? AND event_type='FILL' AND sequence<=? AND event_time_ms>=COALESCE((SELECT joined_at_ms FROM wallet_onboarding WHERE wallet=?),0) ORDER BY sequence",(wallet,coin,through,wallet)).fetchall(); result=[]; prior=ZERO
         for row in rows:
             fill=self._source_fill(wallet,row["payload"],prior); result.append(fill); prior=fill.after_position
         return result

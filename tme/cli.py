@@ -24,7 +24,7 @@ def main()->None:
     args=p.parse_args(); db=Database(args.db); engine=MemoryEngine(db)
     if args.command=="serve":
         processor=ProcessingEngine(db,allocation_gap_pct=__import__("decimal").Decimal(os.getenv("HRS_ALLOCATION_GAP_PCT","3")))
-        threading.Thread(target=processing_loop,args=(processor,args.processor_interval,int(os.getenv("PROCESSOR_BATCH_SIZE","1"))),name="hrs-processing",daemon=True).start()
+        threading.Thread(target=processing_loop,args=(processor,args.processor_interval,int(os.getenv("PROCESSOR_BATCH_SIZE","25"))),name="hrs-processing",daemon=True).start()
         collector_service=collector_from_env(db)
         if collector_service:
             threading.Thread(target=lambda: asyncio.run(collector_service.run()),name="hyperliquid-collector",daemon=True).start()
