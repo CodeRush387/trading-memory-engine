@@ -54,6 +54,8 @@ class ProcessingEngine:
         canonical=json.loads(event["payload"])
         source=canonical.get("raw") if isinstance(canonical.get("raw"),dict) else canonical
         if source.get("ingestion_mode")=="RECOVERY":return
+        gate=con.execute("SELECT ready_for_execution FROM wallet_onboarding WHERE wallet=?",(wallet,)).fetchone()
+        if gate is not None and not bool(gate["ready_for_execution"]):return
         result=ProcessingCore.evaluate(state,fill,self.allocation_gap_pct)
         if result.decision not in {Decision.INITIAL_ENTRY,Decision.ROTATE_SIGNAL} or result.challenger is None:return
         item=result.challenger; action="ENTRY" if result.decision==Decision.INITIAL_ENTRY else "ROTATE"; generation=item.latest_capital_event.fill.event_id

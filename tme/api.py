@@ -9,6 +9,7 @@ from urllib.parse import parse_qs, urlparse
 
 from .engine import MemoryEngine
 
+from .coverage import WalletCoverage
 
 class APIHandler(BaseHTTPRequestHandler):
     engine: MemoryEngine
@@ -60,7 +61,7 @@ class APIHandler(BaseHTTPRequestHandler):
                     if item: return self._json(200,item)
                     time.sleep(.1)
                 return self._json(204,{})
-            if u.path == "/v1/wallets": return self._json(200, self.engine.db.rows("SELECT * FROM wallets"))
+            if u.path == "/v1/wallets": return self._json(200, WalletCoverage(self.engine.db).wallets())
             if len(parts) == 4 and parts[:2] == ["v1", "projection"]:
                 return self._json(200, self.engine.projection(parts[2], parts[3]))
             if len(parts) == 3 and parts[:2] == ["v1", "projection"]:

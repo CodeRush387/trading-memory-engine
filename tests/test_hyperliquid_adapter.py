@@ -21,7 +21,7 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
         payload=json.dumps({"events":[[W,raw()],{"user":W,"data":raw("2")} ]});items=HyperliquidAdapter.stream_events(payload);self.assertEqual([x[1]["tid"] for x in items],["1","2"])
     async def test_bootstrap_enters_journal_projection_and_live(self):
         tmp=tempfile.TemporaryDirectory();db=Database(str(Path(tmp.name)/"db.sqlite"));MemoryEngine(db).add_wallet(W);service=HyperliquidCollectorService(db,FakeAdapter());await service.bootstrap(W)
-        self.assertEqual(db.rows("SELECT COUNT(*) n FROM event_journal")[0]["n"],1);self.assertEqual(MemoryEngine(db).projection(W,"BTC")["size"],"1");self.assertEqual(MemoryEngine(db).wallet(W)["status"],"LIVE");db.close();tmp.cleanup()
+        self.assertEqual(db.rows("SELECT COUNT(*) n FROM event_journal")[0]["n"],0);self.assertEqual(MemoryEngine(db).projection(W,"BTC")["size"],"1");report=service.coverage.report(W);self.assertEqual(report["status"],"SYNCING");self.assertEqual(report["legacy_remaining"],1);self.assertFalse(report["ready_for_execution"]);db.close();tmp.cleanup()
     async def test_stream_failure_forces_all_wallets_to_reconcile(self):
         tmp=tempfile.TemporaryDirectory();db=Database(str(Path(tmp.name)/"db.sqlite"));MemoryEngine(db).add_wallet(W)
         service=HyperliquidCollectorService(db,FakeAdapter(),refresh_seconds=.01);service.bootstrapped.add(W);calls=[]

@@ -5,12 +5,13 @@ from .collector import Collector
 from .database import Database
 from .engine import MemoryEngine
 from .hyperliquid import HyperliquidAdapter
+from .coverage import WalletCoverage
 
 log=logging.getLogger("tme.collector")
 ACTIVE={"DISCOVERING","SYNCING","READY","LIVE"}
 class HyperliquidCollectorService:
     def __init__(self,db:Database,adapter:HyperliquidAdapter,refresh_seconds:float=1,dexes:tuple[str|None,...]=(None,)):
-        self.db=db;self.adapter=adapter;self.collector=Collector(MemoryEngine(db));self.refresh_seconds=refresh_seconds;self.dexes=dexes;self.bootstrapped=set();self.stop=asyncio.Event();self.last_sync_ms=0;self.last_event_ms=0
+        self.db=db;self.adapter=adapter;self.collector=Collector(MemoryEngine(db));self.coverage=WalletCoverage(db);self.refresh_seconds=refresh_seconds;self.dexes=dexes;self.bootstrapped=set();self.stop=asyncio.Event();self.last_sync_ms=0;self.last_event_ms=0
     def heartbeat(self,status:str="LIVE",error:str|None=None,**details)->None:
         with self.db.transaction() as con:
             details={"last_sync_ms":self.last_sync_ms,"last_event_ms":self.last_event_ms,**details}
@@ -20,20 +21,10 @@ class HyperliquidCollectorService:
     async def bootstrap(self,wallet:str)->None:
         self.heartbeat("SYNCING",wallet=wallet)
         with self.db.transaction() as con:con.execute("UPDATE wallets SET status='SYNCING',recovery_status='RECOVERING' WHERE address=?",(wallet,))
-        fills,state=await asyncio.gather(asyncio.to_thread(self.adapter.historical_fills,wallet),asyncio.to_thread(self.adapter.current_state,wallet,self.dexes))
-        for index,raw in enumerate(fills,1):
-            try:
-                event=self.adapter.canonical(wallet,raw)
-                event.setdefault("raw",{})["ingestion_mode"]="RECOVERY"
-                self.collector.accept_fill(event)
-                if index%250==0:self.heartbeat("SYNCING",wallet=wallet,ingested=index,total=len(fills))
-            except RuntimeError as exc:
-                if "wallet is" not in str(exc):raise
-        self.collector.engine.snapshot(wallet)
-        result=self.collector.accept_state(wallet,state)
-        if result["mismatches"]:log.warning("wallet=%s startup mismatch=%s",wallet,result["mismatches"])
-        else:
-            self.collector.engine.command_wallet(wallet,"LIVE");self.bootstrapped.add(wallet);self.last_sync_ms=int(time.time()*1000);self.heartbeat("LIVE",wallet=wallet,fills=len(fills));log.info("wallet=%s bootstrap complete fills=%s",wallet,len(fills))
+        state=await asyncio.to_thread(self.adapter.current_state,wallet,self.dexes)
+        report=self.coverage.onboard(wallet,state);self.bootstrapped.add(wallet);self.last_sync_ms=int(time.time()*1000)
+        self.heartbeat("LIVE",wallet=wallet,coverage_pct=report["coverage_pct"],legacy_remaining=report["legacy_remaining"])
+        log.info("wallet=%s onboarding complete legacy=%s coverage=%s",wallet,report["legacy_remaining"],report["coverage_pct"])
     async def run_subscription(self,wallets:set[str])->None:
         queue=asyncio.Queue()
         async def reader():
@@ -54,6 +45,7 @@ class HyperliquidCollectorService:
                     event.setdefault("raw",{})["ingestion_mode"]="LIVE"
                     self.collector.accept_fill(event)
                     self.last_event_ms=int(time.time()*1000)
+                    self.coverage.observe(wallet,event)
         finally:task.cancel();await asyncio.gather(task,return_exceptions=True)
     async def run(self)->None:
         backoff=1.0

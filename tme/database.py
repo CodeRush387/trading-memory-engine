@@ -49,6 +49,20 @@ CREATE TABLE IF NOT EXISTS operational_status (
   details TEXT NOT NULL DEFAULT '{}', last_error TEXT,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS wallet_onboarding (
+  wallet TEXT PRIMARY KEY, joined_at_ms INTEGER NOT NULL, snapshot TEXT NOT NULL,
+  legacy_total INTEGER NOT NULL DEFAULT 0, legacy_remaining INTEGER NOT NULL DEFAULT 0,
+  coverage_pct TEXT NOT NULL DEFAULT '0', ready_for_execution INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(wallet) REFERENCES wallets(address)
+);
+CREATE TABLE IF NOT EXISTS wallet_asset_coverage (
+  wallet TEXT NOT NULL, coin TEXT NOT NULL, state TEXT NOT NULL,
+  baseline_size TEXT NOT NULL, current_size TEXT NOT NULL, updated_at_ms INTEGER NOT NULL,
+  PRIMARY KEY(wallet,coin), FOREIGN KEY(wallet) REFERENCES wallets(address)
+);
+CREATE INDEX IF NOT EXISTS coverage_state ON wallet_asset_coverage(wallet,state);
+
 
 CREATE TRIGGER IF NOT EXISTS journal_no_update BEFORE UPDATE ON event_journal
 BEGIN SELECT RAISE(ABORT, 'event_journal is append-only'); END;
