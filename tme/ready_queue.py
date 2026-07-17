@@ -77,6 +77,8 @@ class ReadyQueue:
     def quarantine_pending(self)->int:
         with self.db.transaction() as con:
             cur=con.execute("UPDATE ready_queue SET status='QUARANTINED',lease_until_ms=NULL,consumer=NULL WHERE status IN ('READY','INFLIGHT')")
+            boundary=int(con.execute("SELECT COALESCE(MAX(sequence),0) n FROM event_journal").fetchone()["n"])
+            con.execute("UPDATE processor_offsets SET last_sequence=?,updated_at=CURRENT_TIMESTAMP",(boundary,))
             return cur.rowcount
 
     def health(self) -> dict[str,Any]:
