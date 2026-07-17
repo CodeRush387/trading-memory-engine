@@ -39,8 +39,17 @@ class HyperliquidCollectorService:
             async for item in self.adapter.trades(sorted(wallets)):await queue.put(item)
         task=asyncio.create_task(reader(),name="hyperliquid-grpc-reader")
         async def notifier_loop():
+            last_report_check=0.0
             while not self.stop.is_set():
                 await asyncio.to_thread(self.notifier.drain_one)
+                now=time.monotonic()
+                if now-last_report_check>=60:
+                    last_report_check=now
+                    try:
+                        sent=await asyncio.to_thread(self.notifier.send_coverage_report_if_due,float(os.getenv("TME_COVERAGE_REPORT_HOURS","5")))
+                        if sent:log.info("coverage email report sent")
+                    except Exception:
+                        log.exception("coverage email report failed; will retry")
                 await asyncio.sleep(5)
         notify_task=asyncio.create_task(notifier_loop(),name="email-notification-outbox")
         try:
