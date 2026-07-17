@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
@@ -85,13 +86,24 @@ class Database:
             con = sqlite3.connect(self.path, isolation_level=None, timeout=30)
             con.row_factory = sqlite3.Row
             con.execute("PRAGMA foreign_keys=ON")
+            con.execute("PRAGMA busy_timeout=30000")
+            con.execute("PRAGMA journal_mode=WAL")
+            con.execute("PRAGMA synchronous=FULL")
             self._local.con = con
         return con
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
         con = self.connection()
-        con.execute("BEGIN IMMEDIATE")
+        # SQLite has a single writer. Absorb transient writer contention here.
+        for attempt in range(8):
+            try:
+                con.execute("BEGIN IMMEDIATE")
+                break
+            except sqlite3.OperationalError as exc:
+                if "locked" not in str(exc).lower() or attempt == 7:
+                    raise
+                time.sleep(min(0.025 * (2**attempt), 0.5))
         try:
             yield con
             con.commit()

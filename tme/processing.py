@@ -13,17 +13,25 @@ class ProcessingEngine:
     def set_held(self,wallet:str,asset:str|None,side:str|None=None):
         with self.db.transaction() as con: con.execute("INSERT INTO processor_wallet_runtime(processor,wallet,held_asset,held_side) VALUES(?,?,?,?) ON CONFLICT(processor,wallet) DO UPDATE SET held_asset=excluded.held_asset,held_side=excluded.held_side,updated_at=CURRENT_TIMESTAMP",(self.name,wallet.lower(),asset,side))
     def process_available(self,limit:int=500)->int:
+        con=self.db.connection()
+        off=con.execute("SELECT last_sequence FROM processor_offsets WHERE processor=?",(self.name,)).fetchone(); after=int(off["last_sequence"]) if off else 0
+        events=con.execute("SELECT j.sequence,j.wallet,j.payload,w.status FROM event_journal j JOIN wallets w ON w.address=j.wallet WHERE j.sequence>? AND j.event_type='FILL' ORDER BY j.sequence LIMIT ?",(after,min(max(limit,1),5000))).fetchall()
+        last_sequence=after
+        # Release SQLite's only writer lock between atomic event+offset units.
+        for event in events:
+            sequence=int(event["sequence"])
+            with self.db.transaction() as tx:
+                current=tx.execute("SELECT last_sequence FROM processor_offsets WHERE processor=?",(self.name,)).fetchone()
+                if current is not None and int(current["last_sequence"]) >= sequence:
+                    last_sequence=max(last_sequence,int(current["last_sequence"]))
+                    continue
+                if event["status"] in ACTIVE:self._process_event(tx,event)
+                tx.execute("INSERT INTO processor_offsets(processor,last_sequence) VALUES(?,?) ON CONFLICT(processor) DO UPDATE SET last_sequence=excluded.last_sequence,updated_at=CURRENT_TIMESTAMP",(self.name,sequence))
+            last_sequence=sequence
         with self.db.transaction() as con:
-            off=con.execute("SELECT last_sequence FROM processor_offsets WHERE processor=?",(self.name,)).fetchone(); after=int(off["last_sequence"]) if off else 0
-            events=con.execute("SELECT j.sequence,j.wallet,j.payload,w.status FROM event_journal j JOIN wallets w ON w.address=j.wallet WHERE j.sequence>? AND j.event_type='FILL' ORDER BY j.sequence LIMIT ?",(after,min(max(limit,1),5000))).fetchall()
-            for event in events:
-                sequence=int(event["sequence"])
-                if event["status"] in ACTIVE:self._process_event(con,event)
-                con.execute("INSERT INTO processor_offsets(processor,last_sequence) VALUES(?,?) ON CONFLICT(processor) DO UPDATE SET last_sequence=excluded.last_sequence,updated_at=CURRENT_TIMESTAMP",(self.name,sequence))
-            last_sequence=int(events[-1]["sequence"]) if events else after
             details=json.dumps({"last_sequence":last_sequence,"processed":len(events)},separators=(",",":"))
             con.execute("INSERT INTO operational_status(component,status,heartbeat_ms,details,last_error) VALUES('processor','LIVE',?,?,NULL) ON CONFLICT(component) DO UPDATE SET status=excluded.status,heartbeat_ms=excluded.heartbeat_ms,details=excluded.details,last_error=NULL,updated_at=CURRENT_TIMESTAMP",(int(time.time()*1000),details))
-            return len(events)
+        return len(events)
     def _source_fill(self,wallet,payload,prior_size=ZERO):
         canonical=json.loads(payload); raw=canonical.get("raw") if isinstance(canonical.get("raw"),dict) else canonical
         if "px" in raw:return Fill.from_raw(wallet,raw)
